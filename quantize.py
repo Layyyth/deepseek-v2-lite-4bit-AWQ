@@ -1,48 +1,24 @@
+from transformers import AutoModelForCausalLM, AutoTokenizer
 from vllm import LLM, SamplingParams
-from transformers import AutoTokenizer
-from huggingface_hub import HfFolder, Repository
-import shutil
-import os
 
-base_model = "deepseek-ai/DeepSeek-V2-Lite-Chat"
-quantized_dir = "./DeepSeek-V2-Lite-Chat-4bit-vllm"
-upload_repo_id = "LaythAbuJafar/Deepseek-v2-lite-4bit-AWQ"
 
-# Load tokenizer for saving later
-tokenizer = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
+model_name = "deepseek-ai/DeepSeek-V2-Lite-Chat"
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModelForCausalLM.from_pretrained(model_name)
 
-# Initialize vLLM LLM, specifying quantization (AWQ or GPTQ)
-llm = LLM(
-    model=base_model,
-    tensor_parallel_size=1,
-    max_model_len=8192,
-    trust_remote_code=True,
-    quantize='awq'  # or 'gptq' if you want that
+
+quantized_model = LLM(
+    model=model_name,
+    quantization="awq",  
+    dtype="float16",     
+    gpu_memory_utilization=0.9  
 )
 
-# Run a dummy generation (optional) to initialize weights in vLLM
-prompt = "Hello world!"
-sampling_params = SamplingParams(temperature=0.3, max_tokens=32)
-outputs = llm.generate([prompt], sampling_params=sampling_params)
+
+prompt = "Explain the concept of AI in simple terms."
+sampling_params = SamplingParams(temperature=0.7, top_p=0.95, max_tokens=50)
+outputs = quantized_model.generate([prompt], sampling_params)
 print(outputs[0].outputs[0].text)
 
-# Save quantized weights
-llm.save_quantized(quantized_dir)
-tokenizer.save_pretrained(quantized_dir)
-print(f"Quantized model and tokenizer saved to {quantized_dir}")
 
-# Prepare pushing to HF Hub
-
-# Clone repo or create if not exists locally
-if os.path.exists(quantized_dir + "/.git"):
-    print("Using existing git repo")
-else:
-    repo = Repository(quantized_dir, clone_from=upload_repo_id)
-    print(f"Cloned repo {upload_repo_id}")
-
-# Login with huggingface CLI beforehand: `huggingface-cli login`
-# Push your model
-repo = Repository(quantized_dir)
-repo.push_to_hub(commit_message="Add 4-bit AWQ quantized DeepSeek-V2-Lite-Chat model")
-
-print(f"Model pushed to https://huggingface.co/{upload_repo_id}")
+quantized_model.save("quantized-deepseek-v2-lite-chat")
