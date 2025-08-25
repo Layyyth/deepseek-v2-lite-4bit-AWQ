@@ -1,24 +1,53 @@
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from vllm import LLM, SamplingParams
+# quantize.py
+from llmcompressor import oneshot
+from transformers import AutoTokenizer
 
-
+# Model and output paths
 model_name = "deepseek-ai/DeepSeek-V2-Lite-Chat"
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModelForCausalLM.from_pretrained(model_name)
+save_path = "Deepseek-v2-lite-4bit-AWQ"
 
+# Load tokenizer
+print("🚀 Loading tokenizer...")
+tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
 
-quantized_model = LLM(
+# Define AWQ recipe as a YAML string
+recipe_str = """
+- QuantizationModifier:
+    config_groups:
+      group_0:
+        weights:
+          num_bits: 4
+          type: uint
+          symmetric: true
+          strategy: tensor
+          group_size: 128
+          zero_point: true
+    ignore:
+      - model.encoder.final_layer_norm
+      - model.encoder.layers.*.layer_norm
+      - model.decoder.final_layer_norm
+      - model.decoder.layers.*.layer_norm
+    scheme:
+      weights:
+        type: llm.int4
+    targets: ["Linear"]
+    quantize_embeddings: false
+    quantize_layer_norms: false
+    quantize_output_logits: false
+    device: "cuda:0"
+"""
+
+print("🔥 Starting AWQ quantization...")
+oneshot(
     model=model_name,
-    quantization="awq",  
-    dtype="float16",     
-    gpu_memory_utilization=0.9  
+    dataset="c4",
+    tokenizer=tokenizer,
+    max_seq_length=512,
+    num_calibration_samples=32,
+    output_dir=save_path,
+    recipe=recipe_str,
+    device="cuda:0",
+    trust_remote_code=True,
 )
 
-
-prompt = "Explain the concept of AI in simple terms."
-sampling_params = SamplingParams(temperature=0.7, top_p=0.95, max_tokens=50)
-outputs = quantized_model.generate([prompt], sampling_params)
-print(outputs[0].outputs[0].text)
-
-
-quantized_model.save("quantized-deepseek-v2-lite-chat")
+print(f"✅ Quantization complete! Model saved to {save_path}")
