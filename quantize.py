@@ -1,53 +1,48 @@
-from awq import AutoAWQForCausalLM
+from vllm import LLM, SamplingParams
 from transformers import AutoTokenizer
-import torch
+from huggingface_hub import HfFolder, Repository
+import shutil
+import os
 
-# Define model paths
-base_model_path = "deepseek-ai/DeepSeek-V2-Lite-Chat"
-quantized_model_path = "DeepSeek-V2-Lite-Chat-4bit-AWQ"
+base_model = "deepseek-ai/DeepSeek-V2-Lite-Chat"
+quantized_dir = "./DeepSeek-V2-Lite-Chat-4bit-vllm"
+upload_repo_id = "LaythAbuJafar/Deepseek-v2-lite-4bit-AWQ"
 
-# Define quantization configuration
-quant_config = {
-    "w_bit": 4,
-    "q_group_size": 128,
-    "zero_point": True,
-    "version": "GEMM"
-}
+# Load tokenizer for saving later
+tokenizer = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
 
-if __name__ == "__main__":
-    print("=================================================================")
-    print("          STARTING AWQ QUANTIZATION SCRIPT                       ")
-    print("=================================================================")
-    print(f"-> Base Model: {base_model_path}")
-    print(f"-> Output Path: {quantized_model_path}")
-    print(f"-> PyTorch Version: {torch.__version__}")
-    print("-----------------------------------------------------------------")
+# Initialize vLLM LLM, specifying quantization (AWQ or GPTQ)
+llm = LLM(
+    model=base_model,
+    tensor_parallel_size=1,
+    max_model_len=8192,
+    trust_remote_code=True,
+    quantize='awq'  # or 'gptq' if you want that
+)
 
-    # Step 1: Load the base model and tokenizer
-    print("\n[STEP 1/3] Loading base model and tokenizer...")
-    try:
-        model = AutoAWQForCausalLM.from_pretrained(base_model_path)
-        tokenizer = AutoTokenizer.from_pretrained(base_model_path, trust_remote_code=True)
-        print("-> SUCCESS: Model and tokenizer loaded.")
-    except Exception as e:
-        print(f"-> ERROR: Failed to load model. {e}")
-        exit()
+# Run a dummy generation (optional) to initialize weights in vLLM
+prompt = "Hello world!"
+sampling_params = SamplingParams(temperature=0.3, max_tokens=32)
+outputs = llm.generate([prompt], sampling_params=sampling_params)
+print(outputs[0].outputs[0].text)
 
-    # Step 2: Quantize the model
-    print("\n[STEP 2/3] Quantizing the model...")
-    try:
-        model.quantize(tokenizer, quant_config=quant_config)
-        print("-> SUCCESS: Quantization complete.")
-    except Exception as e:
-        print(f"-> ERROR: Failed during quantization. {e}")
-        exit()
+# Save quantized weights
+llm.save_quantized(quantized_dir)
+tokenizer.save_pretrained(quantized_dir)
+print(f"Quantized model and tokenizer saved to {quantized_dir}")
 
-    # Step 3: Save the quantized model and tokenizer
-    print(f"\n[STEP 3/3] Saving quantized model to '{quantized_model_path}'...")
-    try:
-        model.save_quantized(quantized_model_path)
-        tokenizer.save_pretrained(quantized_model_path)
-        print(f"-> SUCCESS: Quantized model saved at '{quantized_model_path}'")
-    except Exception as e:
-        print(f"-> ERROR: Failed to save quantized model. {e}")
-        exit()
+# Prepare pushing to HF Hub
+
+# Clone repo or create if not exists locally
+if os.path.exists(quantized_dir + "/.git"):
+    print("Using existing git repo")
+else:
+    repo = Repository(quantized_dir, clone_from=upload_repo_id)
+    print(f"Cloned repo {upload_repo_id}")
+
+# Login with huggingface CLI beforehand: `huggingface-cli login`
+# Push your model
+repo = Repository(quantized_dir)
+repo.push_to_hub(commit_message="Add 4-bit AWQ quantized DeepSeek-V2-Lite-Chat model")
+
+print(f"Model pushed to https://huggingface.co/{upload_repo_id}")
