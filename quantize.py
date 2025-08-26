@@ -1,30 +1,33 @@
-from llm_compressor.recipes import AWQModifier, QuantizationModifier
-from llm_compressor.engine import Compressor
-from transformers import AutoTokenizer
+import torch
+from llmcompressor import oneshot
+from llmcompressor.modifiers.awq import AWQModifier
 
-model_name = "meta-llama/Meta-Llama-3-8B-Instruct"
-quantized_model_path = "./llama3-8b-instruct-awq"
+# Define the model to be quantized
+model_name = "Qwen/Qwen2-7B-Instruct"
 
-# Define the compression recipe, using AWQ for 4-bit weights
+# Define the output path for the quantized model
+quantized_model_path = "./Qwen2-7B-Instruct-awq"
+
+# Define the AWQ quantization recipe
+# W4A16_ASYM means 4-bit weights, 16-bit activations, asymmetric quantization
 recipe = [
-    AWQModifier(ignore=["lm_head"], scheme="W4A16_ASYM", targets=["Linear"]),
-    QuantizationModifier(
+    AWQModifier(
+        ignore=["lm_head"],
         scheme="W4A16_ASYM",
-        targets=[".*"], # Apply quantization to all layers except those ignored by AWQ
+        targets=["Linear"],
         group_size=128,
     ),
 ]
 
-# Initialize the compressor
-compressor = Compressor(
+# Run the one-shot quantization
+# The library automatically downloads a calibration dataset from Hugging Face for this step
+oneshot(
+    model=model_name,
+    dataset="open_platypus",  # A small calibration dataset
     recipe=recipe,
-    model_name=model_name,
-    quantized_model_path=quantized_model_path,
+    output_dir=quantized_model_path,
+    num_calibration_samples=512,
+    max_seq_length=2048,
 )
 
-# Run the compression
-compressor.run()
-
-# Save the tokenizer and quantization config
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-tokenizer.save_pretrained(quantized_model_path)
+print(f"Quantized model saved to: {quantized_model_path}")
