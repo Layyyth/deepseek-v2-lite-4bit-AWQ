@@ -1,10 +1,5 @@
-# quantize.py (fixed for 429 error)
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
-
-# Import from llmcompressor
-from llmcompressor.modifiers.awq import AWQModifier
-from llmcompressor import oneshot
 
 # -------------------------------
 # Configuration
@@ -29,14 +24,12 @@ model = AutoModelForCausalLM.from_pretrained(
 # Set padding token
 if tokenizer.pad_token is None:
     tokenizer.pad_token = tokenizer.eos_token
-tokenizer.padding_side = "left"  # Critical for calibration
+tokenizer.padding_side = "left"  # Required for calibration
 
 # -------------------------------
-# 🔥 Calibration Data: No Hugging Face Streaming!
+# Calibration Data (Local, No HF Streaming)
 # -------------------------------
 print("Using local calibration prompts...")
-
-# Tiny calibration dataset (no network needed)
 calib_texts = [
     "The capital of France is Paris.",
     "Solve step by step: 123456789 ÷ 11. First, apply divisibility rule...",
@@ -48,7 +41,7 @@ calib_texts = [
     "Translate this to French: 'I am learning machine learning.'",
     "Explain the difference between supervised and unsupervised learning.",
     "Debug the following Python code: def add(a, b): return a - b"
-] * 4  # 40 samples
+] * 4  # ~40 samples
 
 def calib_func(model):
     model.eval()
@@ -64,28 +57,53 @@ def calib_func(model):
             model(**inputs)
 
 # -------------------------------
-# Apply AWQ
+# ✅ CORRECT WAY: Use Recipe String
 # -------------------------------
-print("Applying AWQ...")
-awq_modifier = AWQModifier(
-    bits=4,
-    group_size=128,
-    zero_point=True,
-    calib_data=calib_texts,
-)
+print("Creating AWQ recipe...")
+awq_recipe = """
+quantization:
+  ignore: ["lm_head"]
+  config_groups:
+    group_0:
+      bits: 4
+      group_size: 128
+      scheme: sym
+      format: affine
+  calib_config:
+    num_samples: 32
+    forward_passes: 1
 
+modifiers:
+  - !AWQModifier
+    name: 'AWQ'
+    bits: 4
+    group_size: 128
+    zero_point: true
+    calib_data: null  # Will be passed via oneshot
+    model_fqn: null
+    n_samples: 32
+    seq_len: 512
+"""
+
+# -------------------------------
+# Apply Quantization
+# -------------------------------
+from llmcompressor import oneshot
+
+print("Applying AWQ via recipe...")
 oneshot(
     model=model,
-    recipe=awq_modifier,
+    recipe=awq_recipe,
     calib_func=calib_func,
-    num_calib_steps=len(calib_texts),
+    calib_data=calib_texts[:32],  # Pass actual data here
+    num_calib_steps=32,
     use_zephyr_chat_template=False,
 )
 
 # -------------------------------
 # Save Quantized Model
 # -------------------------------
-print(f"Saving to {OUTPUT_DIR}...")
+print(f"Saving quantized model to {OUTPUT_DIR}...")
 model.save_pretrained(OUTPUT_DIR)
 tokenizer.save_pretrained(OUTPUT_DIR)
 
