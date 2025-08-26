@@ -9,9 +9,17 @@ python -m venv myenv
 source myenv/bin/activate
 
 
-3- install libraries 
+3- install nvim & libraries 
+sudo apt update && sudo apt upgrade -y
+sudo apt install neovim -y
+
+git clone https://github.com/mit-han-lab/llm-awq.git
+cd llm-awq
+pip install -e .
+
 pip install transformers datasets torch accelerate safetensors
 
-4- install nvim
+4- run quantize script
+
 
 
