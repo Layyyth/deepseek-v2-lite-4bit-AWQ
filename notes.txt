@@ -1,0 +1,17 @@
+1- create the directory
+cd workflow
+mkdir awq-project
+cd awq-project
+touch quantize.py
+
+2- start a venv
+python -m venv myenv
+source myenv/bin/activate
+
+
+3- install libraries 
+pip install transformers datasets torch accelerate safetensors
+
+4- install nvim
+
+
